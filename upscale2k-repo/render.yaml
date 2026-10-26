@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: upscale2k
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile

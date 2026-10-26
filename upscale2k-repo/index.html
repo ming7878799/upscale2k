@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upscale2K — Tăng độ phân giải video lên 2K bằng AI</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0d0d12; color:#eee;
+         display:flex; justify-content:center; padding:24px 16px; }
+  .box { max-width:640px; width:100%; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h1 span { color:#f5a623; }
+  .sub { color:#9a9aa5; margin-bottom:20px; font-size:14px; }
+  .card { background:#17171f; border:1px solid #2a2a35; border-radius:14px; padding:20px; }
+  .drop { border:2px dashed #3a3a48; border-radius:12px; padding:28px; text-align:center;
+          cursor:pointer; color:#bbb; }
+  .drop:hover { border-color:#f5a623; color:#fff; }
+  .drop input { display:none; }
+  .fname { margin-top:10px; color:#f5a623; font-size:14px; word-break:break-all; }
+  .modes { display:flex; gap:10px; margin:16px 0; }
+  .mode { flex:1; border:1px solid #2a2a35; border-radius:10px; padding:12px; cursor:pointer; }
+  .mode.sel { border-color:#f5a623; background:#221a0d; }
+  .mode b { display:block; margin-bottom:2px; }
+  .mode small { color:#9a9aa5; }
+  button { width:100%; padding:14px; border:0; border-radius:10px; background:#f5a623;
+           color:#111; font-size:16px; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  .bar { height:12px; background:#26262f; border-radius:6px; overflow:hidden; margin:16px 0 6px; display:none; }
+  .bar i { display:block; height:100%; width:0%; background:#f5a623; transition:width .4s; }
+  .status { font-size:14px; color:#9a9aa5; min-height:20px; }
+  .dl { display:none; margin-top:14px; text-align:center; }
+  .dl a { color:#111; background:#39d98a; padding:12px 22px; border-radius:10px;
+          text-decoration:none; font-weight:700; display:inline-block; }
+  .note { font-size:13px; color:#77777f; margin-top:16px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>Upscale<span>2K</span></h1>
+  <div class="sub">Tăng độ phân giải video lên 2K bằng AI (ngang 2560×1440 · dọc 1440×2560). Giữ nguyên âm thanh gốc.</div>
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="video/*">
+      <div>📹 Bấm để chọn video (hoặc kéo thả vào đây)</div>
+      <div class="fname" id="fname"></div>
+    </label>
+    <div class="modes">
+      <div class="mode" data-mode="fast" id="m-fast">
+        <b>⚡ Nhanh</b><small>FSRCNN-small — hợp clip dài</small>
+      </div>
+      <div class="mode sel" data-mode="quality" id="m-quality">
+        <b>✨ Đẹp</b><small>FSRCNN — nét hơn, chậm hơn</small>
+      </div>
+    </div>
+    <button id="go" disabled>Bắt đầu tăng lên 2K</button>
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="status" id="status"></div>
+    <div class="dl" id="dl"><a id="dlink" href="#">⬇ Tải video 2K</a></div>
+  </div>
+  <div class="note">
+    Cách hoạt động: AI tăng nét từng khung hình ×2 rồi ráp lại đúng chuẩn 2K.
+    Máy chủ hiện tại chạy bằng CPU nên video 10 giây mất khoảng 2–5 phút tuỳ chế độ;
+    bản thương mại sẽ chạy GPU nhanh hơn nhiều lần.
+  </div>
+</div>
+<script>
+let mode = 'quality', fileObj = null, jobId = null;
+const $ = id => document.getElementById(id);
+document.querySelectorAll('.mode').forEach(el => el.onclick = () => {
+  document.querySelectorAll('.mode').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel'); mode = el.dataset.mode;
+});
+$('file').onchange = e => {
+  fileObj = e.target.files[0];
+  $('fname').textContent = fileObj ? fileObj.name : '';
+  $('go').disabled = !fileObj;
+};
+$('go').onclick = async () => {
+  if (!fileObj) return;
+  $('go').disabled = true; $('dl').style.display = 'none';
+  $('bar').style.display = 'block'; $('fill').style.width = '0%';
+  $('status').textContent = 'Đang tải video lên…';
+  const fd = new FormData();
+  fd.append('file', fileObj); fd.append('mode', mode);
+  const r = await fetch('api/upload', { method: 'POST', body: fd });
+  const j = await r.json();
+  if (!j.job_id) { $('status').textContent = 'Lỗi tải lên, thử lại nhé.'; $('go').disabled = false; return; }
+  jobId = j.job_id;
+  $('status').textContent = 'Đang xử lý…';
+  const timer = setInterval(async () => {
+    const s = await (await fetch('api/status/' + jobId)).json();
+    if (s.state === 'processing' || s.state === 'queued') {
+      $('fill').style.width = (s.progress || 0) + '%';
+      $('status').textContent = s.state === 'queued' ? 'Đang chờ tới lượt…'
+        : `Đang tăng nét: ${s.done}/${s.total} khung hình (${s.progress}%)`;
+    } else if (s.state === 'done') {
+      clearInterval(timer);
+      $('fill').style.width = '100%';
+      $('status').textContent = `Xong! Video 2K: ${s.info.width}×${s.info.height}, ${s.info.frames} khung hình.`;
+      $('dlink').href = 'api/download/' + jobId;
+      $('dl').style.display = 'block'; $('go').disabled = false;
+    } else if (s.state === 'error') {
+      clearInterval(timer);
+      $('status').textContent = 'Có lỗi khi xử lý: ' + s.message;
+      $('go').disabled = false;
+    }
+  }, 1500);
+};
+</script>
+</body>
+</html>
